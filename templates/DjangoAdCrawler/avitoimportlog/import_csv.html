@@ -1,0 +1,204 @@
+{% extends 'admin/base_site.html' %}
+{% block content %}
+<h1 style="margin-bottom: 1em;">Импорт товаров из CSV (Avito)</h1>
+<form method="post" style="margin-bottom: 32px; text-align: right;">
+  {% csrf_token %}
+  <button type="submit" name="preview" class="default button grp-button">Предпросмотр</button>
+</form>
+{% if preview and columns and show_mapping %}
+  <form method="post" class="grp-form" style="margin-bottom: 24px;">
+    {% csrf_token %}
+    <fieldset class="grp-module">
+      <legend>Маппинг столбцов</legend>
+      <table class="grp-table">
+        {% for field, label in import_fields %}
+          <tr>
+            <td style="min-width: 180px;"><b>{{ label }}</b></td>
+            <td>
+              <select name="col_{{ field }}" class="grp-select" style="min-width: 220px;" {% if field != 'category' %}required{% endif %} onchange="toggleCategorySelect()">
+                <option value="">-- выбрать столбец --</option>
+                {% for col in columns %}
+                  <option value="{{ col }}" {% if forloop.first %}selected{% endif %}>{{ col }}</option>
+                {% endfor %}
+              </select>
+            </td>
+          </tr>
+        {% endfor %}
+        <tr id="category-row">
+          <td><b>Категория для всех товаров</b></td>
+          <td>
+            <select name="category_id" id="category_id_select" class="grp-select" style="min-width: 220px;">
+              <option value="">-- выбрать категорию --</option>
+              {% for cat in categories %}
+                <option value="{{ cat.id }}" {% if cat.id|stringformat:'s' == selected_category_id %}selected{% endif %}>{{ cat.name }}</option>
+              {% endfor %}
+            </select>
+            <span class="help">Если в файле нет столбца "Категория"</span>
+          </td>
+        </tr>
+      </table>
+    </fieldset>
+    <div style="margin-top: 2em; text-align: right;">
+      <button type="submit" name="import" class="default button grp-button">Импортировать</button>
+    </div>
+  </form>
+  <div id="import-progress-container" style="margin-top: 2em;">
+    <div id="import-warning" style="display:none; margin-bottom:1em; padding:0.7em 1em; background:#fff3cd; color:#856404; border-radius:5px; font-weight:bold;">
+      Не закрывайте и не перезагружайте страницу — работает импорт
+    </div>
+    <div style="margin-top: 1em; display: flex; align-items: center; gap: 1em;">
+      <span id="import-status" style="padding: 0.5em 1em; border-radius: 5px; font-weight: bold; background: #eee; color: #333;">Статус: —</span>
+      <span id="import-percent" style="font-weight: bold;"></span>
+      <span id="import-timer" style="font-weight: bold; color: #007bff;"></span>
+      <span id="import-error" style="color: red; display: none;"></span>
+    </div>
+    <div style="margin-top: 1em; display: flex; gap: 1em;">
+      <form method="post" style="display: inline;">
+        {% csrf_token %}
+        <button type="submit" name="start" id="import-start-btn" class="default button grp-button">Старт/Продолжить</button>
+      </form>
+      <form method="post" style="display: inline;">
+        {% csrf_token %}
+        <button type="submit" name="pause" id="import-pause-btn" class="button grp-button">Пауза</button>
+      </form>
+      <form method="post" style="display: inline;">
+        {% csrf_token %}
+        <button type="submit" name="stop" id="import-stop-btn" class="button grp-button">Стоп</button>
+      </form>
+    </div>
+  </div>
+  <script>
+    function toggleCategorySelect() {
+      var catCol = document.querySelector('select[name="col_category"]');
+      var catRow = document.getElementById('category-row');
+      if (catCol && catCol.value) {
+        catRow.style.display = 'none';
+      } else {
+        catRow.style.display = '';
+      }
+    }
+    document.addEventListener('DOMContentLoaded', toggleCategorySelect);
+    document.querySelector('select[name="col_category"]').addEventListener('change', toggleCategorySelect);
+
+    function updateImportProgress() {
+      fetch('{% url "DjangoAdCrawler_import_progress_status" %}')
+        .then(response => response.json())
+        .then(data => {
+          const status = document.getElementById('import-status');
+          const percent = document.getElementById('import-percent');
+          const timer = document.getElementById('import-timer');
+          const error = document.getElementById('import-error');
+          const warning = document.getElementById('import-warning');
+          let percentText = '';
+          if (data.total && data.current) {
+            const percentValue = Math.round((data.current / data.total) * 100);
+            percentText = `(${data.current} из ${data.total}, ${percentValue}%)`;
+          }
+          percent.textContent = percentText;
+          if ((data.status === 'paused' || data.status === 'waiting') && data.seconds_left > 0) {
+            timer.style.display = '';
+            timer.textContent = ` | До продолжения: ${formatSeconds(data.seconds_left)}`;
+            window.secondsLeft = data.seconds_left;
+          } else {
+            timer.style.display = 'none';
+            timer.textContent = '';
+            window.secondsLeft = null;
+          }
+          if (data.status) {
+            let color = '#eee';
+            let textColor = '#333';
+            let label = '';
+            if (data.status === 'running') {
+              color = '#d4edda'; textColor = '#155724'; label = 'Запущен';
+            } else if (data.status === 'waiting' || data.status === 'paused') {
+              color = '#fff3cd'; textColor = '#856404'; label = 'Пауза';
+            } else if (data.status === 'error') {
+              color = '#f8d7da'; textColor = '#721c24'; label = 'Ошибка';
+            } else if (data.status === 'completed') {
+              color = '#d1ecf1'; textColor = '#0c5460'; label = 'Завершено';
+            } else {
+              label = data.status;
+            }
+            status.textContent = `Статус: ${label}`;
+            status.style.background = color;
+            status.style.color = textColor;
+          }
+          if (data.error) {
+            error.textContent = data.error;
+            error.style.display = '';
+          } else {
+            error.textContent = '';
+            error.style.display = 'none';
+          }
+          if (["running","paused","waiting"].includes(data.status)) {
+            warning.style.display = '';
+          } else {
+            warning.style.display = 'none';
+          }
+
+          // --- АВТОПРОДОЛЖЕНИЕ после паузы ---
+          if ((data.status === 'paused' || data.status === 'waiting') && (data.seconds_left === 0 || data.seconds_left === undefined)) {
+            autoContinueImport();
+          }
+        });
+    }
+    function formatSeconds(sec) {
+      sec = Math.max(0, sec|0);
+      const m = Math.floor(sec/60);
+      const s = sec%60;
+      return m > 0 ? `${m}:${s.toString().padStart(2,'0')}` : `${s} сек.`;
+    }
+    function autoContinueImport() {
+      // Находим форму с кнопкой "Старт/Продолжить" и отправляем её через JS
+      var startForm = document.querySelector('form button[name="start"]')?.form;
+      if (startForm && !window._autoContinueLock) {
+        window._autoContinueLock = true;
+        var formData = new FormData(startForm);
+        fetch(startForm.action, {
+          method: 'POST',
+          body: formData,
+          credentials: 'same-origin',
+        }).then(() => {
+          setTimeout(() => { window._autoContinueLock = false; }, 2000);
+          updateImportProgress();
+        });
+      }
+    }
+    setInterval(() => {
+      if (window.secondsLeft > 0) {
+        window.secondsLeft--;
+        const timer = document.getElementById('import-timer');
+        timer.textContent = ` | До продолжения: ${formatSeconds(window.secondsLeft)}`;
+      }
+    }, 1000);
+    document.addEventListener('DOMContentLoaded', updateImportProgress);
+  </script>
+{% endif %}
+{% if error %}
+  <div class="grp-errors" style="color: #b94a48; margin-bottom: 1em;">{{ error }}</div>
+{% endif %}
+{% if preview and columns %}
+  <h2 style="margin-top: 2em;">Предпросмотр данных</h2>
+  <p class="help">Проверьте, что данные корректны. Если всё верно, выберите соответствие столбцов и категорию, затем нажмите "Импортировать".</p>
+  <div style="max-height: 320px; overflow-x: auto; overflow-y: auto; border: 1px solid #eee; border-radius: 4px;">
+    <table class="admin-table grp-table" style="min-width: 600px;">
+      <thead>
+        <tr>
+          {% for col in columns %}
+            <th>{{ col }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in preview %}
+          <tr>
+            {% for cell in row %}
+              <td>{{ cell }}</td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+{% endblock %} 

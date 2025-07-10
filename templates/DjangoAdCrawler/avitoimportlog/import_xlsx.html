@@ -1,0 +1,38 @@
+{% extends 'admin/base_site.html' %}
+{% block content %}
+<h1>Импорт товаров из XLSX (Avito)</h1>
+<form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    {{ form.as_p }}
+    {% if not preview %}
+        <button type="submit" name="preview" class="default">Предпросмотр</button>
+    {% endif %}
+</form>
+
+{% if preview and columns %}
+    <h2>Предпросмотр данных</h2>
+    <p>Проверьте, что данные корректны. Если всё верно, нажмите "Импортировать".</p>
+    <table class="admin-table">
+        <thead>
+            <tr>
+                {% for col in columns %}
+                    <th>{{ col }}</th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in preview %}
+                <tr>
+                    {% for cell in row %}
+                        <td>{{ cell }}</td>
+                    {% endfor %}
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <form method="post">
+        {% csrf_token %}
+        <button type="submit" name="import" class="default">Импортировать</button>
+    </form>
+{% endif %}
+{% endblock %} 
